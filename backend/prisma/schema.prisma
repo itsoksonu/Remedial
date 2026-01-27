@@ -1,0 +1,597 @@
+// schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+  previewFeatures = ["fullTextSearchPostgres", "postgresqlExtensions"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+  extensions = [uuidOssp(map: "uuid-ossp"), pgTrgm(map: "pg_trgm")]
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  admin
+  manager
+  biller
+  rcm_specialist
+  appeals_specialist
+}
+
+enum ClaimStatus {
+  pending
+  in_progress
+  appealed
+  resolved
+  rejected
+  paid
+  partial_paid
+}
+
+enum DenialPriority {
+  critical
+  high
+  medium
+  low
+}
+
+enum ActionType {
+  reprocess
+  reject
+  send_appeal
+  mark_paid
+  status_change
+  assignment
+}
+
+enum PaymentStatus {
+  pending
+  posted
+  verified
+  rejected
+}
+
+enum AppealStatus {
+  draft
+  submitted
+  pending_review
+  approved
+  denied
+}
+
+enum NotificationType {
+  email
+  sms
+  in_app
+  push
+}
+
+enum SubscriptionTier {
+  free
+  basic
+  professional
+  enterprise
+}
+
+// ============================================
+// MODELS
+// ============================================
+
+model Organization {
+  id                    String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                  String            @db.VarChar(255)
+  taxId                 String?           @map("tax_id") @db.VarChar(50)
+  subscriptionTier      SubscriptionTier  @default(free) @map("subscription_tier")
+  subscriptionExpiresAt DateTime?         @map("subscription_expires_at") @db.Timestamptz
+  npi                   String?           @db.VarChar(10)
+  address               Json?
+  settings              Json              @default("{}")
+  stripeCustomerId      String?           @map("stripe_customer_id") @db.VarChar(255)
+  isActive              Boolean           @default(true) @map("is_active")
+  createdAt             DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  users                 User[]
+  payers                Payer[]
+  providers             Provider[]
+  patients              Patient[]
+  claims                Claim[]
+  appeals               Appeal[]
+  paymentPostings       PaymentPosting[]
+  denialAnalytics       DenialAnalytics[]
+  notifications         Notification[]
+  fileUploads           FileUpload[]
+  auditLogs             AuditLog[]
+  invoices              SubscriptionInvoice[]
+  denialRules           DenialRule[]
+
+  @@map("organizations")
+}
+
+model User {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organizationId  String    @map("organization_id") @db.Uuid
+  email           String    @unique @db.VarChar(255)
+  passwordHash    String    @map("password_hash") @db.VarChar(255)
+  firstName       String    @map("first_name") @db.VarChar(100)
+  lastName        String    @map("last_name") @db.VarChar(100)
+  role            UserRole  @default(biller)
+  phone           String?   @db.VarChar(20)
+  avatarUrl       String?   @map("avatar_url")
+  preferences     Json      @default("{}")
+  isActive        Boolean   @default(true) @map("is_active")
+  emailVerified   Boolean   @default(false) @map("email_verified")
+  lastLoginAt     DateTime? @map("last_login_at") @db.Timestamptz
+  passwordResetToken String?   @map("password_reset_token") @db.VarChar(255)
+  passwordResetExpires DateTime? @map("password_reset_expires") @db.Timestamptz
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization          Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sessions              UserSession[]
+  assignedClaims        Claim[]           @relation("AssignedClaims")
+  claimActions          ClaimAction[]
+  claimNotes            ClaimNote[]
+  appeals               Appeal[]          @relation("AppealCreator")
+  submittedAppeals      Appeal[]          @relation("AppealSubmitter")
+  paymentPostings       PaymentPosting[]  @relation("PaymentPoster")
+  verifiedPayments      PaymentPosting[]  @relation("PaymentVerifier")
+  notifications         Notification[]
+  fileUploads           FileUpload[]
+  auditLogs             AuditLog[]
+  createdDenialRules    DenialRule[]
+
+  @@index([organizationId])
+  @@index([email])
+  @@map("users")
+}
+
+model UserSession {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @map("token_hash") @db.VarChar(255)
+  ipAddress String?  @map("ip_address") @db.Inet
+  userAgent String?  @map("user_agent")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("user_sessions")
+}
+
+model Payer {
+  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  name             String   @db.VarChar(255)
+  payerId          String?  @map("payer_id") @db.VarChar(50)
+  type             String?  @db.VarChar(50)
+  contactInfo      Json?    @map("contact_info")
+  portalUrl        String?  @map("portal_url")
+  remittanceEmail  String?  @map("remittance_email") @db.VarChar(255)
+  avgResponseDays  Int?     @map("avg_response_days")
+  settings         Json     @default("{}")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  claims        Claim[]
+  denialRules   DenialRule[]
+  appeals       Appeal[]      @relation("AppealSubmittedTo")
+
+  @@unique([organizationId, payerId])
+  @@map("payers")
+}
+
+model Provider {
+  id             String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  firstName      String?  @map("first_name") @db.VarChar(100)
+  lastName       String?  @map("last_name") @db.VarChar(100)
+  npi            String?  @unique @db.VarChar(10)
+  taxonomyCode   String?  @map("taxonomy_code") @db.VarChar(20)
+  specialization String?  @db.VarChar(100)
+  email          String?  @db.VarChar(255)
+  phone          String?  @db.VarChar(20)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  claims       Claim[]
+
+  @@map("providers")
+}
+
+model Patient {
+  id             String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  firstName      String   @map("first_name") @db.VarChar(100)
+  lastName       String   @map("last_name") @db.VarChar(100)
+  dateOfBirth    DateTime? @map("date_of_birth") @db.Date
+  gender         String?  @db.VarChar(20)
+  mrn            String?  @db.VarChar(50)
+  ssnEncrypted   String?  @map("ssn_encrypted") @db.VarChar(255)
+  contactInfo    Json?    @map("contact_info")
+  insuranceInfo  Json?    @map("insurance_info")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  claims       Claim[]
+
+  @@unique([organizationId, mrn])
+  @@map("patients")
+}
+
+model Claim {
+  id                     String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organizationId         String          @map("organization_id") @db.Uuid
+  claimNumber            String          @map("claim_number") @db.VarChar(100)
+  patientId              String?         @map("patient_id") @db.Uuid
+  providerId             String?         @map("provider_id") @db.Uuid
+  payerId                String?         @map("payer_id") @db.Uuid
+  
+  dateOfService          DateTime        @map("date_of_service") @db.Date
+  totalCharge            Decimal         @map("total_charge") @db.Decimal(10, 2)
+  allowedAmount          Decimal?        @map("allowed_amount") @db.Decimal(10, 2)
+  paidAmount             Decimal         @default(0) @map("paid_amount") @db.Decimal(10, 2)
+  patientResponsibility  Decimal         @default(0) @map("patient_responsibility") @db.Decimal(10, 2)
+  adjustmentAmount       Decimal         @default(0) @map("adjustment_amount") @db.Decimal(10, 2)
+  
+  denialCode             String?         @map("denial_code") @db.VarChar(20)
+  denialCodeNormalized   String?         @map("denial_code_normalized") @db.VarChar(20)
+  denialReason           String?         @map("denial_reason")
+  denialDate             DateTime?       @map("denial_date") @db.Date
+  
+  status                 ClaimStatus     @default(pending)
+  priority               DenialPriority  @default(medium)
+  
+  assignedTo             String?         @map("assigned_to") @db.Uuid
+  assignedAt             DateTime?       @map("assigned_at") @db.Timestamptz
+  
+  aiRecommendedAction    String?         @map("ai_recommended_action")
+  aiConfidenceScore      Decimal?        @map("ai_confidence_score") @db.Decimal(3, 2)
+  aiAnalyzedAt           DateTime?       @map("ai_analyzed_at") @db.Timestamptz
+  
+  metadata               Json            @default("{}")
+  tags                   String[]
+  
+  createdAt              DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+  resolvedAt             DateTime?       @map("resolved_at") @db.Timestamptz
+
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient         Patient?           @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  provider        Provider?          @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  payer           Payer?             @relation(fields: [payerId], references: [id], onDelete: SetNull)
+  assignedUser    User?              @relation("AssignedClaims", fields: [assignedTo], references: [id], onDelete: SetNull)
+  
+  lineItems       ClaimLineItem[]
+  actions         ClaimAction[]
+  notes           ClaimNote[]
+  appeals         Appeal[]
+  paymentPostings PaymentPosting[]
+  fileUploads     FileUpload[]
+  notifications   Notification[]
+
+  @@unique([organizationId, claimNumber])
+  @@index([organizationId])
+  @@index([status])
+  @@index([priority])
+  @@index([assignedTo])
+  @@index([denialCodeNormalized])
+  @@index([dateOfService])
+  @@index([patientId])
+  @@index([payerId])
+  @@index([providerId])
+  @@map("claims")
+}
+
+model ClaimLineItem {
+  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  claimId          String   @map("claim_id") @db.Uuid
+  lineNumber       Int      @map("line_number")
+  
+  cptCode          String   @map("cpt_code") @db.VarChar(10)
+  modifier         String?  @db.VarChar(10)
+  description      String?
+  
+  units            Int      @default(1)
+  chargeAmount     Decimal  @map("charge_amount") @db.Decimal(10, 2)
+  allowedAmount    Decimal? @map("allowed_amount") @db.Decimal(10, 2)
+  paidAmount       Decimal  @default(0) @map("paid_amount") @db.Decimal(10, 2)
+  adjustmentAmount Decimal  @default(0) @map("adjustment_amount") @db.Decimal(10, 2)
+  
+  denialCode       String?  @map("denial_code") @db.VarChar(20)
+  denialReason     String?  @map("denial_reason")
+  
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  claim              Claim               @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  paymentLineItems   PaymentLineItem[]
+
+  @@unique([claimId, lineNumber])
+  @@index([claimId])
+  @@index([cptCode])
+  @@map("claim_line_items")
+}
+
+model DenialRule {
+  id                   String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organizationId       String?         @map("organization_id") @db.Uuid
+  denialCode           String          @map("denial_code") @db.VarChar(20)
+  payerId              String?         @map("payer_id") @db.Uuid
+  
+  reason               String
+  recommendedAction    String          @map("recommended_action")
+  requiredDocumentation String[]       @map("required_documentation")
+  appealSuccessRate    Decimal?        @map("appeal_success_rate") @db.Decimal(3, 2)
+  
+  priorityOverride     DenialPriority? @map("priority_override")
+  autoPriorityRules    Json?           @map("auto_priority_rules")
+  
+  isActive             Boolean         @default(true) @map("is_active")
+  createdBy            String?         @map("created_by") @db.Uuid
+  createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  payer        Payer?         @relation(fields: [payerId], references: [id], onDelete: Cascade)
+  creator      User?          @relation(fields: [createdBy], references: [id])
+
+  @@unique([organizationId, denialCode, payerId])
+  @@map("denial_rules")
+}
+
+model ClaimAction {
+  id            String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  claimId       String      @map("claim_id") @db.Uuid
+  userId        String      @map("user_id") @db.Uuid
+  actionType    ActionType  @map("action_type")
+  description   String?
+  notes         String?
+  previousState Json?       @map("previous_state")
+  newState      Json?       @map("new_state")
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  claim Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([claimId])
+  @@index([createdAt(sort: Desc)])
+  @@map("claim_actions")
+}
+
+model ClaimNote {
+  id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  claimId    String   @map("claim_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  content    String
+  isInternal Boolean  @default(true) @map("is_internal")
+  mentions   String[] @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  claim Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([claimId])
+  @@map("claim_notes")
+}
+
+model Appeal {
+  id                   String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  claimId              String        @map("claim_id") @db.Uuid
+  organizationId       String        @map("organization_id") @db.Uuid
+  appealNumber         String?       @map("appeal_number") @db.VarChar(100)
+  level                Int           @default(1)
+  status               AppealStatus  @default(draft)
+  
+  letterContent        String?       @map("letter_content")
+  supportingDocuments  String[]      @map("supporting_documents")
+  
+  submittedTo          String?       @map("submitted_to") @db.Uuid
+  submittedAt          DateTime?     @map("submitted_at") @db.Timestamptz
+  submittedBy          String?       @map("submitted_by") @db.Uuid
+  
+  responseReceivedAt   DateTime?     @map("response_received_at") @db.Timestamptz
+  responseContent      String?       @map("response_content")
+  outcome              String?       @db.VarChar(50)
+  recoveredAmount      Decimal?      @map("recovered_amount") @db.Decimal(10, 2)
+  
+  createdBy            String?       @map("created_by") @db.Uuid
+  createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  claim        Claim         @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  payer        Payer?        @relation("AppealSubmittedTo", fields: [submittedTo], references: [id])
+  creator      User?         @relation("AppealCreator", fields: [createdBy], references: [id])
+  submitter    User?         @relation("AppealSubmitter", fields: [submittedBy], references: [id])
+  fileUploads  FileUpload[]
+  notifications Notification[]
+
+  @@index([claimId])
+  @@index([status])
+  @@index([organizationId])
+  @@map("appeals")
+}
+
+model PaymentPosting {
+  id              String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  claimId         String         @map("claim_id") @db.Uuid
+  organizationId  String         @map("organization_id") @db.Uuid
+  paymentDate     DateTime       @map("payment_date") @db.Date
+  checkNumber     String?        @map("check_number") @db.VarChar(50)
+  totalAmount     Decimal        @map("total_amount") @db.Decimal(10, 2)
+  
+  postedBy        String         @map("posted_by") @db.Uuid
+  postedAt        DateTime       @default(now()) @map("posted_at") @db.Timestamptz
+  verifiedBy      String?        @map("verified_by") @db.Uuid
+  verifiedAt      DateTime?      @map("verified_at") @db.Timestamptz
+  
+  status          PaymentStatus  @default(pending)
+  eobDocumentKey  String?        @map("eob_document_key") @db.VarChar(255)
+  eraTraceNumber  String?        @map("era_trace_number") @db.VarChar(50)
+  notes           String?
+  
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  claim        Claim              @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  poster       User               @relation("PaymentPoster", fields: [postedBy], references: [id])
+  verifier     User?              @relation("PaymentVerifier", fields: [verifiedBy], references: [id])
+  lineItems    PaymentLineItem[]
+
+  @@index([claimId])
+  @@index([organizationId])
+  @@index([paymentDate(sort: Desc)])
+  @@map("payment_postings")
+}
+
+model PaymentLineItem {
+  id                 String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  paymentPostingId   String   @map("payment_posting_id") @db.Uuid
+  claimLineItemId    String?  @map("claim_line_item_id") @db.Uuid
+  cptCode            String   @map("cpt_code") @db.VarChar(10)
+  paidAmount         Decimal  @map("paid_amount") @db.Decimal(10, 2)
+  adjustmentAmount   Decimal  @default(0) @map("adjustment_amount") @db.Decimal(10, 2)
+  adjustmentCodes    String[] @map("adjustment_codes") @db.VarChar(20)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  paymentPosting PaymentPosting @relation(fields: [paymentPostingId], references: [id], onDelete: Cascade)
+  claimLineItem  ClaimLineItem? @relation(fields: [claimLineItemId], references: [id], onDelete: SetNull)
+
+  @@map("payment_line_items")
+}
+
+model DenialAnalytics {
+  id                String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organizationId    String   @map("organization_id") @db.Uuid
+  periodStart       DateTime @map("period_start") @db.Date
+  periodEnd         DateTime @map("period_end") @db.Date
+  
+  totalDenials      Int      @default(0) @map("total_denials")
+  totalDenialAmount Decimal  @default(0) @map("total_denial_amount") @db.Decimal(12, 2)
+  totalAppeals      Int      @default(0) @map("total_appeals")
+  successfulAppeals Int      @default(0) @map("successful_appeals")
+  appealSuccessRate Decimal? @map("appeal_success_rate") @db.Decimal(3, 2)
+  recoveredAmount   Decimal  @default(0) @map("recovered_amount") @db.Decimal(12, 2)
+  
+  denialsByCode     Json?    @map("denials_by_code")
+  denialsByPayer    Json?    @map("denials_by_payer")
+  denialsByProvider Json?    @map("denials_by_provider")
+  trendData         Json?    @map("trend_data")
+  
+  generatedAt       DateTime @default(now()) @map("generated_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, periodStart, periodEnd])
+  @@map("denial_analytics")
+}
+
+model Notification {
+  id              String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId          String            @map("user_id") @db.Uuid
+  organizationId  String            @map("organization_id") @db.Uuid
+  type            NotificationType
+  title           String            @db.VarChar(255)
+  message         String
+  relatedClaimId  String?           @map("related_claim_id") @db.Uuid
+  relatedAppealId String?           @map("related_appeal_id") @db.Uuid
+  actionUrl       String?           @map("action_url")
+  isRead          Boolean           @default(false) @map("is_read")
+  readAt          DateTime?         @map("read_at") @db.Timestamptz
+  sentAt          DateTime?         @map("sent_at") @db.Timestamptz
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  claim        Claim?        @relation(fields: [relatedClaimId], references: [id], onDelete: Cascade)
+  appeal       Appeal?       @relation(fields: [relatedAppealId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+model FileUpload {
+  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  uploadedBy       String   @map("uploaded_by") @db.Uuid
+  originalFilename String   @map("original_filename") @db.VarChar(255)
+  s3Key            String   @unique @map("s3_key") @db.VarChar(500)
+  mimeType         String?  @map("mime_type") @db.VarChar(100)
+  sizeBytes        BigInt?  @map("size_bytes")
+  fileType         String?  @map("file_type") @db.VarChar(50)
+  relatedClaimId   String?  @map("related_claim_id") @db.Uuid
+  relatedAppealId  String?  @map("related_appeal_id") @db.Uuid
+  metadata         Json     @default("{}")
+  isDeleted        Boolean  @default(false) @map("is_deleted")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  uploader     User         @relation(fields: [uploadedBy], references: [id])
+  claim        Claim?       @relation(fields: [relatedClaimId], references: [id], onDelete: Cascade)
+  appeal       Appeal?      @relation(fields: [relatedAppealId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([relatedClaimId])
+  @@map("file_uploads")
+}
+
+model AuditLog {
+  id             String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  action         String   @db.VarChar(100)
+  entityType     String   @map("entity_type") @db.VarChar(50)
+  entityId       String?  @map("entity_id") @db.Uuid
+  ipAddress      String?  @map("ip_address") @db.Inet
+  userAgent      String?  @map("user_agent")
+  oldValues      Json?    @map("old_values")
+  newValues      Json?    @map("new_values")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model SubscriptionInvoice {
+  id                  String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organizationId      String   @map("organization_id") @db.Uuid
+  stripeInvoiceId     String   @unique @map("stripe_invoice_id") @db.VarChar(255)
+  amount              Decimal  @db.Decimal(10, 2)
+  currency            String   @default("USD") @db.VarChar(3)
+  status              String?  @db.VarChar(50)
+  invoicePdfUrl       String?  @map("invoice_pdf_url")
+  billingPeriodStart  DateTime? @map("billing_period_start") @db.Date
+  billingPeriodEnd    DateTime? @map("billing_period_end") @db.Date
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("subscription_invoices")
+}
