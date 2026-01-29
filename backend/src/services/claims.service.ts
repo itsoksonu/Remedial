@@ -1,7 +1,8 @@
-import { Prisma, ClaimStatus, DenialPriority } from '@prisma/client';
+import { Prisma, ClaimStatus, DenialPriority, ActionType } from '@prisma/client';
 import prisma from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { cache } from '../utils/cache';
+import { Readable } from 'stream';
 
 const claimInclude = {
   lineItems: true,
@@ -28,81 +29,44 @@ const claimInclude = {
 };
 
 export class ClaimsService {
-  async createClaim(organizationId: string, data: any) {
-    const claim = await prisma.claim.create({
-      data: {
-        organizationId,
-        ...data,
-        lineItems: data.lineItems
-          ? {
-              create: data.lineItems,
-            }
-          : undefined,
-      },
-      include: {
-        lineItems: true,
-        patient: true,
-        provider: true,
-        payer: true,
-      },
-    });
-
-    // Invalidate cache
-    await cache.invalidatePattern(`claims:${organizationId}:*`);
-
-    return claim;
-  }
-
-  async getClaims(organizationId: string, filters: any) {
+  async findAll(organizationId: string, filters: any) {
     const cacheKey = `claims:${organizationId}:${JSON.stringify(filters)}`;
-
-    // Try cache first
-    const cached = await cache.get(cacheKey);
+    const cached = await cache.get<any>(cacheKey);
     if (cached) return cached;
 
-    const {
-      page = 1,
-      limit = 20,
-      status,
-      priority,
-      assignedTo,
-      search,
-      dateFrom,
-      dateTo,
-    } = filters;
+    const page = Number(filters.page) || 1;
+    const limit = Math.min(Number(filters.limit) || 20, 100);
+    const skip = (page - 1) * limit;
 
     const where: Prisma.ClaimWhereInput = {
       organizationId,
-      ...(status && { status: status as ClaimStatus }),
-      ...(priority && { priority: priority as DenialPriority }),
-      ...(assignedTo && { assignedTo }),
-      ...(search && {
-        OR: [
-          { claimNumber: { contains: search, mode: 'insensitive' } },
-          {
-            patient: {
-              OR: [
-                { firstName: { contains: search, mode: 'insensitive' } },
-                { lastName: { contains: search, mode: 'insensitive' } },
-              ],
-            },
-          },
-          { denialReason: { contains: search, mode: 'insensitive' } },
-        ],
-      }),
-      ...(dateFrom || dateTo
-        ? {
-            dateOfService: {
-              ...(dateFrom && { gte: dateFrom }),
-              ...(dateTo && { lte: dateTo }),
-            },
-          }
-        : {}),
     };
+
+    if (filters.status) where.status = filters.status as ClaimStatus;
+    if (filters.priority) where.priority = filters.priority as DenialPriority;
+    if (filters.assignedTo) where.assignedTo = filters.assignedTo;
+    if (filters.payerId) where.payerId = filters.payerId;
+    if (filters.providerId) where.providerId = filters.providerId;
+
+    if (filters.search) {
+      where.OR = [
+        { claimNumber: { contains: filters.search, mode: 'insensitive' } },
+        { patient: { firstName: { contains: filters.search, mode: 'insensitive' } } },
+        { patient: { lastName: { contains: filters.search, mode: 'insensitive' } } },
+      ];
+    }
+
+    if (filters.dateFrom || filters.dateTo) {
+      where.dateOfService = {};
+      if (filters.dateFrom) where.dateOfService.gte = new Date(filters.dateFrom);
+      if (filters.dateTo) where.dateOfService.lte = new Date(filters.dateTo);
+    }
 
     const [claims, total] = await Promise.all([
       prisma.claim.findMany({
         where,
+        skip,
+        take: limit,
         include: {
           patient: { select: { firstName: true, lastName: true } },
           provider: { select: { firstName: true, lastName: true } },
@@ -110,8 +74,6 @@ export class ClaimsService {
           assignedUser: { select: { firstName: true, lastName: true, email: true } },
           lineItems: true,
         },
-        skip: (page - 1) * limit,
-        take: limit,
         orderBy: { createdAt: 'desc' },
       }),
       prisma.claim.count({ where }),
@@ -127,13 +89,11 @@ export class ClaimsService {
       },
     };
 
-    // Cache for 5 minutes
-    await cache.set(cacheKey, result, 300);
-
+    await cache.set(cacheKey, result, 300); // 5 minutes
     return result;
   }
 
-  async getClaimById(id: string, organizationId: string) {
+  async findById(id: string, organizationId: string) {
     const claim = await prisma.claim.findFirst({
       where: { id, organizationId },
       include: claimInclude,
@@ -146,101 +106,197 @@ export class ClaimsService {
     return claim;
   }
 
-  async updateClaim(id: string, organizationId: string, data: any, userId: string) {
-    const existingClaim = await this.getClaimById(id, organizationId);
+  async create(organizationId: string, data: any) {
+    const { lineItems, ...claimData } = data;
+
+    // Ensure dateOfService is a Date object
+    if (claimData.dateOfService && typeof claimData.dateOfService === 'string') {
+      claimData.dateOfService = new Date(claimData.dateOfService);
+    }
+
+    const claim = await prisma.claim.create({
+      data: {
+        organizationId,
+        ...claimData,
+        lineItems: lineItems
+          ? {
+              create: lineItems,
+            }
+          : undefined,
+      },
+      include: claimInclude,
+    });
+
+    await cache.invalidatePattern(`claims:${organizationId}:*`);
+    return claim;
+  }
+
+  async update(id: string, organizationId: string, data: any) {
+    const exist = await this.findById(id, organizationId);
 
     const claim = await prisma.claim.update({
       where: { id },
       data,
-      include: {
-        lineItems: true,
-        patient: true,
-        provider: true,
-        payer: true,
-      },
+      include: claimInclude,
     });
 
-    // Log action
-    await prisma.claimAction.create({
+    await cache.invalidatePattern(`claims:${organizationId}:*`);
+    return claim;
+  }
+
+  async assign(id: string, organizationId: string, userId: string, assignedByUserId: string) {
+    await this.findById(id, organizationId); // check exists
+
+    const result = await prisma.$transaction(async (tx) => {
+      const claim = await tx.claim.update({
+        where: { id },
+        data: { assignedTo: userId, assignedAt: new Date() },
+        include: claimInclude,
+      });
+
+      await tx.claimAction.create({
+        data: {
+          claimId: id,
+          userId: assignedByUserId,
+          actionType: ActionType.assignment,
+          description: `Assigned claim to user ${userId}`,
+        },
+      });
+
+      return claim;
+    });
+
+    await cache.invalidatePattern(`claims:${organizationId}:*`);
+    return result;
+  }
+
+  async addNote(
+    id: string,
+    organizationId: string,
+    userId: string,
+    data: { content: string; isInternal: boolean; mentions?: string[] },
+  ) {
+    await this.findById(id, organizationId);
+
+    const note = await prisma.claimNote.create({
       data: {
         claimId: id,
         userId,
-        actionType: 'status_change',
-        description: `Updated claim`,
-        previousState: existingClaim,
-        newState: claim,
+        content: data.content,
+        isInternal: data.isInternal,
+        mentions: data.mentions || [],
       },
+      include: { user: true },
     });
 
-    // Invalidate cache
-    await cache.invalidatePattern(`claims:${organizationId}:*`);
-
-    return claim;
+    return note;
   }
 
-  async importClaimsFromCSV(organizationId: string, csvData: any[]) {
-    const claims = await prisma.$transaction(
-      csvData.map((row) =>
-        prisma.claim.create({
+  async recordAction(
+    id: string,
+    organizationId: string,
+    userId: string,
+    data: { actionType: ActionType; description: string; notes?: string },
+  ) {
+    await this.findById(id, organizationId);
+
+    const action = await prisma.claimAction.create({
+      data: {
+        claimId: id,
+        userId,
+        actionType: data.actionType,
+        description: data.description,
+        notes: data.notes,
+      },
+      include: { user: true },
+    });
+
+    return action;
+  }
+
+  async importClaims(organizationId: string, buffer: Buffer) {
+    // Manual CSV parsing
+    const text = buffer.toString('utf-8');
+    const lines = text.split(/\r?\n/);
+    if (lines.length === 0) return { imported: 0, failed: 0, errors: [] };
+
+    const headers = lines[0].split(',').map((h) => h.trim());
+    const rows: any[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      if (!lines[i].trim()) continue;
+      const values = lines[i].split(',');
+      const row: any = {};
+      headers.forEach((h, idx) => {
+        // Simple handling of potential quotes?
+        // For now, simple split.
+        row[h] = values[idx]?.trim();
+      });
+      rows.push(row);
+    }
+
+    let imported = 0;
+    let failed = 0;
+    const errors: any[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      try {
+        if (!row.claimNumber) throw new Error('Missing claimNumber');
+
+        await prisma.claim.create({
           data: {
             organizationId,
             claimNumber: row.claimNumber,
-            dateOfService: new Date(row.dateOfService),
-            totalCharge: parseFloat(row.totalCharge),
+            patientId: row.patientId || undefined,
+            providerId: row.providerId || undefined,
+            payerId: row.payerId || undefined,
+            dateOfService: new Date(row.dateOfService || new Date()),
+            totalCharge: parseFloat(row.totalCharge || '0'),
             denialCode: row.denialCode,
-            denialCodeNormalized: this.normalizeDenialCode(row.denialCode),
             denialReason: row.denialReason,
-            status: 'pending',
-            priority: 'medium',
+            status: ClaimStatus.pending,
+            priority: DenialPriority.medium,
           },
-        }),
-      ),
-    );
+        });
+        imported++;
+      } catch (err: any) {
+        failed++;
+        errors.push({ row: i + 1, error: err.message });
+      }
+    }
 
     await cache.invalidatePattern(`claims:${organizationId}:*`);
-
-    return claims;
+    return { imported, failed, errors };
   }
 
-  private normalizeDenialCode(code: string): string {
-    if (!code) return '';
-    return code.trim().toUpperCase();
-  }
+  async exportClaims(organizationId: string, filters: any) {
+    const result = await this.findAll(organizationId, { ...filters, limit: 10000 });
+    const data = result.claims;
 
-  async assignClaim(claimId: string, organizationId: string, userId: string, assignedBy: string) {
-    const claim = await prisma.claim.update({
-      where: { id: claimId, organizationId },
-      data: {
-        assignedTo: userId,
-        assignedAt: new Date(),
-      },
+    // Manual CSV generation
+    const header =
+      'Claim Number,Date of Service,Patient Name,Provider Name,Payer,Total Charge,Status,Priority,Denial Code';
+    const rows = data.map((c: any) => {
+      const dos = c.dateOfService ? new Date(c.dateOfService).toISOString().split('T')[0] : '';
+      const pat = `${c.patient?.firstName || ''} ${c.patient?.lastName || ''}`;
+      const prov = `${c.provider?.firstName || ''} ${c.provider?.lastName || ''}`;
+      // Escaping quotes for simpler CSV
+      const escape = (str: string) => `"${(str || '').replace(/"/g, '""')}"`;
+
+      return [
+        c.claimNumber,
+        dos,
+        escape(pat),
+        escape(prov),
+        escape(c.payer?.name || ''),
+        c.totalCharge,
+        c.status,
+        c.priority,
+        escape(c.denialCode || ''),
+      ].join(',');
     });
-
-    await prisma.claimAction.create({
-      data: {
-        claimId,
-        userId: assignedBy,
-        actionType: 'assignment',
-        description: `Assigned to user ${userId}`,
-      },
-    });
-
-    // Send notification
-    await prisma.notification.create({
-      data: {
-        userId,
-        organizationId,
-        type: 'in_app',
-        title: 'New Claim Assigned',
-        message: `Claim ${claim.claimNumber} has been assigned to you`,
-        relatedClaimId: claimId,
-        actionUrl: `/claims/${claimId}`,
-      },
-    });
-
-    await cache.invalidatePattern(`claims:${organizationId}:*`);
-
-    return claim;
+    return [header, ...rows].join('\n');
   }
 }
 

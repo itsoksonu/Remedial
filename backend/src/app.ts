@@ -9,7 +9,7 @@ import { apiLimiter } from './middleware/rateLimit';
 
 // Import Routes
 import authRoutes from './routes/auth.routes';
-// import claimsRoutes from './routes/claims.routes';
+import claimsRoutes from './routes/claims.routes';
 // import denialsRoutes from './routes/denials.routes';
 // import appealsRoutes from './routes/appeals.routes';
 // import paymentsRoutes from './routes/payments.routes';
@@ -34,7 +34,7 @@ app.use(apiLimiter);
 
 // Routes
 app.use('/api/auth', authRoutes);
-// app.use('/api/claims', claimsRoutes);
+app.use('/api/claims', claimsRoutes);
 // app.use('/api/denials', denialsRoutes);
 // app.use('/api/appeals', appealsRoutes);
 // app.use('/api/payments', paymentsRoutes);
