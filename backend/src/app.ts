@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { env } from './config/env';
 import { errorHandler } from './middleware/errorHandler';
-import { apiLimiter } from './middleware/rateLimit';
+import { authLimiter, standardLimiter, fileLimiter, aiLimiter } from './middleware/rateLimit';
 // import { auditLog } from './middleware/audit';
 
 // Import Routes
@@ -33,21 +33,20 @@ app.use('/webhooks', express.raw({ type: 'application/json' }), webhooksRoutes);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(apiLimiter);
 // app.use(auditLog); // Error: auditLog is a factory that requires arguments (e.g., auditLog('action', 'entity')). Apply it to specific routes instead.
 
 // Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/claims', claimsRoutes);
-app.use('/api/denials', denialsRoutes);
-app.use('/api/appeals', appealsRoutes);
-app.use('/api/payments', paymentsRoutes);
-app.use('/api/analytics', analyticsRoutes);
-app.use('/api/users', usersRoutes);
-app.use('/api/organizations', organizationsRoutes);
-app.use('/api/files', filesRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/ai', aiRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/claims', standardLimiter, claimsRoutes);
+app.use('/api/denials', standardLimiter, denialsRoutes);
+app.use('/api/appeals', standardLimiter, appealsRoutes);
+app.use('/api/payments', standardLimiter, paymentsRoutes);
+app.use('/api/analytics', standardLimiter, analyticsRoutes);
+app.use('/api/users', standardLimiter, usersRoutes);
+app.use('/api/organizations', standardLimiter, organizationsRoutes);
+app.use('/api/files', fileLimiter, filesRoutes);
+app.use('/api/notifications', standardLimiter, notificationRoutes);
+app.use('/api/ai', aiLimiter, aiRoutes);
 // app.use('/webhooks', webhooksRoutes); // Removed from here
 
 // Error Handling
