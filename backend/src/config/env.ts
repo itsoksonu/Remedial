@@ -12,6 +12,7 @@ const envSchema = z.object({
   REDIS_URL: z.string(),
   JWT_SECRET: z.string(),
   STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
   AWS_ACCESS_KEY_ID: z.string().optional(),
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
   AWS_REGION: z.string(),

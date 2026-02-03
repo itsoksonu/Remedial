@@ -19,7 +19,7 @@ import usersRoutes from './routes/users.routes';
 import filesRoutes from './routes/files.routes';
 import notificationRoutes from './routes/notification.routes';
 import aiRoutes from './routes/ai.routes';
-// import webhooksRoutes from './routes/webhooks.routes';
+import webhooksRoutes from './routes/webhooks.routes';
 
 const app = express();
 
@@ -27,6 +27,10 @@ const app = express();
 app.use(helmet());
 app.use(cors());
 app.use(morgan('dev'));
+// Routes
+// Webhooks must be registered before express.json() to allow for raw body parsing of the signature
+app.use('/webhooks', express.raw({ type: 'application/json' }), webhooksRoutes);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(apiLimiter);
@@ -44,7 +48,7 @@ app.use('/api/users', usersRoutes);
 app.use('/api/files', filesRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/ai', aiRoutes);
-// app.use('/webhooks', webhooksRoutes);
+// app.use('/webhooks', webhooksRoutes); // Removed from here
 
 // Error Handling
 app.use(errorHandler);
