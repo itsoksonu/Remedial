@@ -11,7 +11,7 @@ export class AIController {
       const { id } = req.params;
       const organizationId = req.user!.organizationId;
 
-      const claim = await claimsService.getClaimById(id, organizationId);
+      const claim = await claimsService.findById(id, organizationId);
 
       const analysis = await aiService.analyzeDenial({
         claimNumber: claim.claimNumber,
@@ -25,17 +25,12 @@ export class AIController {
       });
 
       // Update claim with AI analysis
-      await claimsService.updateClaim(
-        id,
-        organizationId,
-        {
-          aiRecommendedAction: analysis.recommendedAction,
-          aiConfidenceScore: analysis.confidence,
-          aiAnalyzedAt: new Date(),
-          priority: analysis.priority,
-        },
-        req.user!.id,
-      );
+      await claimsService.update(id, organizationId, {
+        aiRecommendedAction: analysis.recommendedAction,
+        aiConfidenceScore: analysis.confidence,
+        aiAnalyzedAt: new Date(),
+        priority: analysis.priority,
+      });
 
       res.json({
         success: true,
@@ -76,7 +71,7 @@ export class AIController {
       const { appealType = 'first' } = req.body;
       const organizationId = req.user!.organizationId;
 
-      const claim = await claimsService.getClaimById(id, organizationId);
+      const claim = await claimsService.findById(id, organizationId);
 
       const letter = await aiService.generateAppealLetter(
         {
