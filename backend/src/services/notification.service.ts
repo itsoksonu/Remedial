@@ -2,7 +2,50 @@ import { PrismaClient, Notification, NotificationType, Prisma } from '@prisma/cl
 
 const prisma = new PrismaClient();
 
+import { socketService } from './socket.service';
+
 export class NotificationService {
+  /**
+   * Create a notification
+   */
+  async createNotification(
+    userId: string,
+    organizationId: string,
+    data: {
+      type: NotificationType;
+      title: string;
+      message: string;
+      claimId?: string;
+      appealId?: string;
+    },
+  ) {
+    const notification = await prisma.notification.create({
+      data: {
+        user: { connect: { id: userId } },
+        organization: { connect: { id: organizationId } },
+        type: data.type,
+        title: data.title,
+        message: data.message,
+        claim: data.claimId ? { connect: { id: data.claimId } } : undefined,
+        appeal: data.appealId ? { connect: { id: data.appealId } } : undefined,
+      },
+      include: {
+        claim: { select: { id: true, claimNumber: true } },
+        appeal: { select: { id: true, appealNumber: true } },
+      },
+    });
+
+    // Emit socket event
+    // Payload: { type: "notification:new", data: { id, title, message } }
+    socketService.emitToUser(userId, 'notification:new', {
+      id: notification.id,
+      title: notification.title,
+      message: notification.message,
+    });
+
+    return notification;
+  }
+
   /**
    * Get notifications for a user
    */

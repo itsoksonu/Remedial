@@ -2,13 +2,15 @@ import { createServer } from 'http';
 import app from './app';
 import { env } from './config/env';
 import { logger } from './utils/logger';
-import { initSockets } from './sockets';
+
 import prisma from './config/database';
+
+import { socketService } from './services/socket.service';
 
 const server = createServer(app);
 
 // Initialize Socket.IO
-const io = initSockets(server);
+socketService.init(server);
 
 // Database connection check
 prisma

@@ -2,6 +2,7 @@ import { AppealStatus, ClaimStatus, Prisma } from '@prisma/client';
 import prisma from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { cache } from '../utils/cache';
+import { socketService } from './socket.service';
 
 const appealInclude = {
   claim: {
@@ -158,7 +159,11 @@ class AppealsService {
     id: string,
     organizationId: string,
     userId: string,
-    data: { payerId: string; submissionMethod: 'portal' | 'fax' | 'mail'; confirmationNumber: string },
+    data: {
+      payerId: string;
+      submissionMethod: 'portal' | 'fax' | 'mail';
+      confirmationNumber: string;
+    },
   ) {
     const existing = await this.findById(id, organizationId);
 
@@ -181,13 +186,24 @@ class AppealsService {
     });
 
     await cache.invalidatePattern(`appeals:${organizationId}:*`);
+
+    // Emit status change
+    socketService.broadcast('appeal:status_changed', {
+      appealId: id,
+      newStatus: AppealStatus.submitted,
+    });
+
     return updated;
   }
 
   async recordResponse(
     id: string,
     organizationId: string,
-    data: { outcome: 'approved' | 'denied' | 'partial_approval'; responseContent: string; recoveredAmount?: number },
+    data: {
+      outcome: 'approved' | 'denied' | 'partial_approval';
+      responseContent: string;
+      recoveredAmount?: number;
+    },
   ) {
     const existing = await this.findById(id, organizationId);
 
@@ -217,9 +233,15 @@ class AppealsService {
     });
 
     await cache.invalidatePattern(`appeals:${organizationId}:*`);
+
+    // Emit status change
+    socketService.broadcast('appeal:status_changed', {
+      appealId: id,
+      newStatus: status,
+    });
+
     return updated;
   }
 }
 
 export default new AppealsService();
-

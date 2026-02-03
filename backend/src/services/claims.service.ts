@@ -4,6 +4,21 @@ import { AppError } from '../middleware/errorHandler';
 import { cache } from '../utils/cache';
 import { Readable } from 'stream';
 import { FilesService } from './files.service';
+import { socketService } from './socket.service';
+import { NotificationType } from '@prisma/client';
+// notificationService is not exported as default or named constant in that file?
+// Let's check imports. notification.service.ts exports named NotificationService but usually creates instance.
+// But wait, NotificationService file structure: export class NotificationService then nothing at end?
+// Ah, let's look at Step 15 output. "export class NotificationService". It doesn't export a default instance.
+// I should likely instantiate it or export a singleton.
+// Step 15 shows: no default export instance.
+// I need open NotificationService to fix export first or just instantiate here.
+// Actually, let's fix NotificationService export first to be consistent with others (e.g. claims.service exports default new ClaimsService()).
+// But wait, I can just do `import { NotificationService } from './notification.service'; const notificationService = new NotificationService();` or similar.
+// But better to singleton export it.
+// I'll proceed with modifying ClaimsService assuming I can fix NotificationService later, OR just create new instance here.
+import { NotificationService } from './notification.service';
+const notificationService = new NotificationService();
 
 const claimInclude = {
   lineItems: true,
@@ -142,6 +157,13 @@ export class ClaimsService {
     });
 
     await cache.invalidatePattern(`claims:${organizationId}:*`);
+
+    // Emit update event
+    socketService.broadcast('claim:updated', {
+      claimId: claim.id,
+      changes: data,
+    });
+
     return claim;
   }
 
@@ -168,6 +190,21 @@ export class ClaimsService {
     });
 
     await cache.invalidatePattern(`claims:${organizationId}:*`);
+
+    // Emit assigned event
+    socketService.broadcast('claim:assigned', {
+      claimId: id,
+      assignedTo: userId,
+    });
+
+    // Create notification
+    await notificationService.createNotification(userId, organizationId, {
+      type: NotificationType.in_app,
+      title: 'New Claim Assigned',
+      message: `Claim ${result.claimNumber} has been assigned to you.`,
+      claimId: id,
+    });
+
     return result;
   }
 
