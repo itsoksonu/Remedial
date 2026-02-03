@@ -1,10 +1,7 @@
 import { Router } from 'express';
 import { ClaimsController } from '../controllers/claims.controller';
 import { authenticate } from '../middleware/auth';
-import multer from 'multer';
-
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage() });
 
 // Apply authentication to all routes
 router.use(authenticate);
@@ -19,7 +16,8 @@ router.post('/', ClaimsController.createClaim);
 router.get('/export', ClaimsController.exportClaims);
 
 // Import claims (must be before :id)
-router.post('/import', upload.single('file'), ClaimsController.importClaims);
+// Import claims
+router.post('/import', ClaimsController.importClaims);
 
 // Get single claim
 router.get('/:id', ClaimsController.getClaimById);

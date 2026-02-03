@@ -3,6 +3,7 @@ import prisma from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { cache } from '../utils/cache';
 import { Readable } from 'stream';
+import { FilesService } from './files.service';
 
 const claimInclude = {
   lineItems: true,
@@ -214,7 +215,17 @@ export class ClaimsService {
     return action;
   }
 
-  async importClaims(organizationId: string, buffer: Buffer) {
+  async importClaims(organizationId: string, fileId: string) {
+    // Fetch file stream from S3
+    const stream = await FilesService.getFileStream(fileId, organizationId);
+
+    // Convert stream to buffer
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.from(chunk));
+    }
+    const buffer = Buffer.concat(chunks);
+
     // Manual CSV parsing
     const text = buffer.toString('utf-8');
     const lines = text.split(/\r?\n/);

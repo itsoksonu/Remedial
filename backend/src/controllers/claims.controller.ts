@@ -116,16 +116,11 @@ export class ClaimsController {
   static async importClaims(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw new AppError('Not authenticated', 401);
-      if (!req.file) throw new AppError('No file uploaded', 400);
+      const { fileId } = req.body;
 
-      // req.file.buffer is available if using memory storage
-      // If disk storage, fs.readFileSync(req.file.path)
-      // Assuming memory storage for simplicity in routes
+      if (!fileId) throw new AppError('File ID is required', 400);
 
-      const buffer = req.file.buffer;
-      if (!buffer) throw new AppError('File buffer is empty', 400);
-
-      const result = await ClaimsService.importClaims(req.user.organizationId, buffer);
+      const result = await ClaimsService.importClaims(req.user.organizationId, fileId);
       res.status(200).json({
         success: true,
         data: result,
