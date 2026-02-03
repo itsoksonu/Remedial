@@ -17,7 +17,7 @@ import analyticsRoutes from './routes/analytics.routes';
 import usersRoutes from './routes/users.routes';
 // import organizationsRoutes from './routes/organizations.routes';
 import filesRoutes from './routes/files.routes';
-// import notificationsRoutes from './routes/notifications.routes';
+import notificationRoutes from './routes/notification.routes';
 import aiRoutes from './routes/ai.routes';
 // import webhooksRoutes from './routes/webhooks.routes';
 
@@ -42,7 +42,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/users', usersRoutes);
 // app.use('/api/organizations', organizationsRoutes);
 app.use('/api/files', filesRoutes);
-// app.use('/api/notifications', notificationsRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/ai', aiRoutes);
 // app.use('/webhooks', webhooksRoutes);
 
