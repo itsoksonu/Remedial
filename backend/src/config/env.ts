@@ -24,6 +24,7 @@ const envSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string(),
   TWILIO_PHONE_NUMBER: z.string(),
   FRONTEND_URL: z.string().default('http://localhost:5173'),
+  CORS_ORIGIN: z.string().default('http://localhost:3000'),
 });
 
 export const env = envSchema.parse(process.env);

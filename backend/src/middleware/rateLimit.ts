@@ -31,7 +31,7 @@ const createLimiter = (windowMs: number, max: number, message: string) => {
 
 export const authLimiter = createLimiter(
   15 * 60 * 1000,
-  5,
+  50,
   'Rate limit exceeded. Try again in 15 minutes.',
 ); // 5 requests per 15 minutes
 export const standardLimiter = createLimiter(

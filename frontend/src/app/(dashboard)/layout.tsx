@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { ModeToggle } from "@/components/ui/mode-toggle";
 
 const sidebarNavItems = [
   {
@@ -142,11 +143,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             </h2>
           </div>
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon">
-              <Icons.sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-              <Icons.moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-              <span className="sr-only">Toggle theme</span>
-            </Button>
+            <ModeToggle />
             <Button variant="ghost" size="icon">
               <Icons.notifications className="h-5 w-5" />
             </Button>

@@ -5,9 +5,30 @@ export class AuthController {
   static async register(req: Request, res: Response, next: NextFunction) {
     try {
       const result = await AuthService.register(req.body);
+
+      // Set refresh token cookie
+      res.cookie('refreshToken', result.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      });
+
+      // Set access token cookie
+      res.cookie('token', result.token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax', // Needed for navigation functionality
+        maxAge: 24 * 60 * 60 * 1000, // 1 day
+      });
+
       res.status(201).json({
         success: true,
-        data: result,
+        data: {
+          user: result.user,
+          organization: result.organization,
+          token: result.token,
+        },
       });
     } catch (error) {
       next(error);
@@ -25,9 +46,21 @@ export class AuthController {
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       });
 
+      // Set access token cookie
+      res.cookie('token', result.token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax', // Needed for navigation functionality
+        maxAge: 24 * 60 * 60 * 1000, // 1 day
+      });
+
       res.status(200).json({
         success: true,
-        data: result,
+        data: {
+          user: result.user,
+          organization: result.organization,
+          token: result.token,
+        },
       });
     } catch (error) {
       next(error);
@@ -58,9 +91,19 @@ export class AuthController {
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       });
 
+      // Set access token cookie
+      res.cookie('token', result.accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax', // Needed for navigation functionality
+        maxAge: 24 * 60 * 60 * 1000, // 1 day
+      });
+
       res.status(200).json({
         success: true,
-        data: result,
+        data: {
+          accessToken: result.accessToken,
+        },
       });
     } catch (error) {
       next(error);
@@ -71,6 +114,7 @@ export class AuthController {
     try {
       await AuthService.logout();
       res.clearCookie('refreshToken');
+      res.clearCookie('token');
       res.status(200).json({
         success: true,
         message: 'Logged out successfully',

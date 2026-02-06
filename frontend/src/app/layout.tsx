@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
-import { Toaster } from "@/components/ui/toaster";
+import { Toaster } from "@/components/ui/sonner";
 
 const font = Plus_Jakarta_Sans({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Medical Claims System",
-  description: "AI-Powered Medical Claims & Denials Management",
+  title: "Remedial - Healthcare Revenue Cycle Management Software",
+  description: "AI-Powered Healthcare Revenue Cycle Management Software for Medical Billing and Denials Management",
 };
 
 export default function RootLayout({
@@ -21,7 +21,7 @@ export default function RootLayout({
       <body className={font.className}>
         <Providers>
           {children}
-          <Toaster />
+          <Toaster position="top-center" />
         </Providers>
       </body>
     </html>
