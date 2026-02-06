@@ -17,9 +17,16 @@ export interface AuthRequest extends Request {
 
 export const authenticate = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    let token = req.headers.authorization?.replace('Bearer ', '');
+
+    // Check cookies if no header token
+    if (!token && req.cookies) {
+      token = req.cookies.token;
+    }
 
     if (!token) {
+      res.clearCookie('token');
+      res.clearCookie('refreshToken');
       throw new AppError('No token provided', 401);
     }
 
@@ -58,8 +65,15 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
     next();
   } catch (error) {
     if (error instanceof jwt.JsonWebTokenError) {
+      res.clearCookie('token');
+      res.clearCookie('refreshToken');
       next(new AppError('Invalid token', 401));
     } else {
+      // For any other auth error, also clear cookies to be safe and prevent loops
+      if (error instanceof AppError && error.statusCode === 401) {
+        res.clearCookie('token');
+        res.clearCookie('refreshToken');
+      }
       next(error);
     }
   }

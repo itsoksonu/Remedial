@@ -1,77 +1,89 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { notificationService } from "@/services/notifications.service";
+import { useQuery } from "@tanstack/react-query";
+import { PageHeader } from "@/components/ui/page-header";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Icons } from "@/lib/icons";
+import { Badge } from "@/components/ui/badge";
+import { notificationService } from "@/services/notifications.service";
 
 export default function NotificationsPage() {
-  const queryClient = useQueryClient();
-  const { data: notificationsData, isLoading } = useQuery({
+  const { data: notifications, isLoading } = useQuery({
     queryKey: ["notifications"],
     queryFn: () => notificationService.getNotifications(),
   });
 
-  const notifications = notificationsData?.data || [];
+  const unreadCount =
+    notifications?.data?.filter((n: any) => !n.read).length || 0;
 
-  const markReadMutation = useMutation({
-    mutationFn: notificationService.markAsRead,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["notifications"] });
-    },
-  });
-
-  if (isLoading) return <div>Loading notifications...</div>;
+  if (isLoading) {
+    return <div>Loading notifications...</div>;
+  }
 
   return (
     <div className="space-y-6">
-      <h2 className="text-3xl font-bold tracking-tight">Notifications</h2>
-      <div className="grid gap-4">
-        {notifications.length === 0 ? (
-          <div className="text-muted-foreground">No notifications.</div>
-        ) : (
-          notifications.map((n: any) => (
-            <Card key={n.id} className={n.isRead ? "opacity-60" : ""}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <div className="flex items-center gap-2">
-                  <CardTitle className="text-base font-medium">
-                    {n.title}
-                  </CardTitle>
-                  {!n.isRead && (
-                    <Badge
-                      variant="destructive"
-                      className="h-2 w-2 rounded-full p-0"
-                    />
-                  )}
+      <PageHeader
+        title="Notifications"
+        description={`You have ${unreadCount} unread notification${unreadCount !== 1 ? "s" : ""}`}
+        actions={
+          <Button variant="outline">
+            <Icons.activity className="mr-2 h-4 w-4" />
+            Mark All as Read
+          </Button>
+        }
+      />
+
+      <div className="space-y-4">
+        {notifications?.data && notifications.data.length > 0 ? (
+          notifications.data.map((notification: any) => (
+            <Card
+              key={notification.id}
+              className={notification.read ? "opacity-60" : ""}
+            >
+              <CardHeader>
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <CardTitle className="text-base">
+                        {notification.title}
+                      </CardTitle>
+                      {!notification.read && (
+                        <Badge variant="default" className="text-xs">
+                          New
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {notification.message}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {new Date(notification.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    {!notification.read && (
+                      <Button variant="ghost" size="sm">
+                        Mark as Read
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="sm">
+                      <Icons.denials className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-                <span className="text-xs text-muted-foreground">
-                  {new Date(n.createdAt).toLocaleString()}
-                </span>
               </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground mb-4">
-                  {n.message}
-                </p>
-                {!n.isRead && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => markReadMutation.mutate(n.id)}
-                  >
-                    Mark as read
-                  </Button>
-                )}
-              </CardContent>
             </Card>
           ))
+        ) : (
+          <Card>
+            <CardContent className="py-12">
+              <div className="text-center text-muted-foreground">
+                <Icons.notifications className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                <p>No notifications yet</p>
+              </div>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>

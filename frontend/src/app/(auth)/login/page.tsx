@@ -48,7 +48,7 @@ export default function LoginPage() {
       toast.success("Logged in successfully.");
       // Small delay to ensure toast is seen and storage is set
       setTimeout(() => {
-        router.push("/dashboard");
+        router.push("/");
       }, 100);
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Something went wrong.");
